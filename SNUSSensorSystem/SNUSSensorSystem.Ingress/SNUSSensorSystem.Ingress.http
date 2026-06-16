@@ -1,0 +1,6 @@
+@SNUSSensorSystem.Ingress_HostAddress = http://localhost:5115
+
+GET {{SNUSSensorSystem.Ingress_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
