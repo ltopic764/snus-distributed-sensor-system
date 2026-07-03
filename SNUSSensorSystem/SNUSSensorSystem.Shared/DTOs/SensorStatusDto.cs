@@ -13,7 +13,7 @@ namespace SNUSSensorSystem.Shared.DTOs
         public string SensorId { get; set; } = string.Empty;
 
         // is active
-        public bool isActive { get; set; }
+        public bool IsActive { get; set; }
 
         // time of the last received mess
         public DateTime? LastMessageReceivedAt { get; set; }

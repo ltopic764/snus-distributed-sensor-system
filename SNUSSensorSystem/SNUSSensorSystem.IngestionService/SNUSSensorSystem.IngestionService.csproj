@@ -16,10 +16,7 @@
   </ItemGroup>
 
   <ItemGroup>
-	<ProjectReference Include="..\SNUSSensorSystem.Shared\SNUSSensorSystem.Shared.csproj"   />
-    <Folder Include="Controllers\" />
-    <Folder Include="Security\" />
-    <Folder Include="Services\" />
+	<ProjectReference Include="..\SNUSSensorSystem.Shared\SNUSSensorSystem.Shared.csproj" />
   </ItemGroup>
 
 </Project>
