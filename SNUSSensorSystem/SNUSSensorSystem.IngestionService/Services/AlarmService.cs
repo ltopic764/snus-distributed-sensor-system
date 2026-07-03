@@ -56,7 +56,7 @@ namespace SNUSSensorSystem.IngestionService.Services
             {
                 AlarmPriority.Low => ConsoleColor.Yellow,
                 AlarmPriority.Medium => ConsoleColor.DarkYellow,
-                AlarmPriority.Hight => ConsoleColor.Red,
+                AlarmPriority.High => ConsoleColor.Red,
                 _ => ConsoleColor.Gray
             };
 

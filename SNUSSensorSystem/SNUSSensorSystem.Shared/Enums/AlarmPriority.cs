@@ -11,6 +11,6 @@ namespace SNUSSensorSystem.Shared.Enums
         None = 0, // no alarm
         Low = 1,
         Medium = 2,
-        Hight = 3
+        High = 3
     }
 }
