@@ -1,53 +1,91 @@
+using AspNetCoreRateLimit;
+using Microsoft.EntityFrameworkCore;
+using SNUSSensorSystem.IngestionService.Data;
+using SNUSSensorSystem.IngestionService.Security;
+using SNUSSensorSystem.IngestionService.Services;
+using SNUSSensorSystem.Shared.Helpers;
 
-namespace SNUSSensorSystem.IngestionService
+var builder = WebApplication.CreateBuilder(args);
+
+// MVC controller, swagger
+builder.Services.AddControllers();
+builder.Services.AddAuthorization();
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+
+// db
+var connectionString = builder.Configuration.GetConnectionString("SensorDb");
+builder.Services.AddDbContext<SensorDbContext>(options => options.UseNpgsql(connectionString));
+
+var keysDir = Path.Combine(builder.Environment.ContentRootPath, "keys");
+Directory.CreateDirectory(keysDir);
+var privPath = Path.Combine(keysDir, "server_private.pem");
+var pubPath = Path.Combine(keysDir, "server_public.pem");
+
+string privPem, pubPem;
+if (File.Exists(privPath) && File.Exists(pubPath))
 {
-    public class Program
+    privPem = File.ReadAllText(privPath);
+    pubPem = File.ReadAllText(pubPath);
+}
+else
+{
+    (pubPem, privPem) = CryptoHelper.GenerateRsaKeyPair();
+    File.WriteAllText(privPath, privPem);
+    File.WriteAllText(pubPath, pubPem);
+}
+
+builder.Services.Configure<ServerCryptoOptions>(opts =>
+{
+    opts.PublicKeyPem = pubPem;
+    opts.PrivateKeyPem = privPem;
+    opts.ReplayToleranceSeconds =
+        builder.Configuration.GetValue<int?>("ServerCrypto:ReplayToleranceSeconds") ?? 30;
+});
+
+builder.Services.AddScoped<IMessageSecurityService, MessageSecurityService>();
+builder.Services.AddSingleton<ISensorRateLimiter, SensorRateLimiter>();
+
+var notificationBaseUrl = builder.Configuration["NotificationService:BaseUrl"]
+                          ?? "http://localhost:5175";
+builder.Services.AddHttpClient<IAlarmService, AlarmService>(client =>
+{
+    client.BaseAddress = new Uri(notificationBaseUrl);
+    client.Timeout = TimeSpan.FromSeconds(5);
+});
+
+builder.Services.AddMemoryCache();
+builder.Services.Configure<IpRateLimitOptions>(
+    builder.Configuration.GetSection("IpRateLimiting"));
+builder.Services.AddInMemoryRateLimiting();
+builder.Services.AddSingleton<IRateLimitConfiguration, RateLimitConfiguration>();
+
+var app = builder.Build();
+
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<SensorDbContext>();
+    try
     {
-        public static void Main(string[] args)
-        {
-            var builder = WebApplication.CreateBuilder(args);
-
-            // Add services to the container.
-            builder.Services.AddAuthorization();
-
-            // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
-            builder.Services.AddEndpointsApiExplorer();
-            builder.Services.AddSwaggerGen();
-
-            var app = builder.Build();
-
-            // Configure the HTTP request pipeline.
-            if (app.Environment.IsDevelopment())
-            {
-                app.UseSwagger();
-                app.UseSwaggerUI();
-            }
-
-            app.UseHttpsRedirection();
-
-            app.UseAuthorization();
-
-            var summaries = new[]
-            {
-                "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-            };
-
-            app.MapGet("/weatherforecast", (HttpContext httpContext) =>
-            {
-                var forecast = Enumerable.Range(1, 5).Select(index =>
-                    new WeatherForecast
-                    {
-                        Date = DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-                        TemperatureC = Random.Shared.Next(-20, 55),
-                        Summary = summaries[Random.Shared.Next(summaries.Length)]
-                    })
-                    .ToArray();
-                return forecast;
-            })
-            .WithName("GetWeatherForecast")
-            .WithOpenApi();
-
-            app.Run();
-        }
+        db.Database.Migrate();
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "DB migration failed at start.");
     }
 }
+
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
+
+app.UseIpRateLimiting();
+app.UseHttpsRedirection();
+app.UseAuthorization();
+app.MapControllers();
+
+app.Logger.LogInformation("IngestionService started. Servers public key in keys/server_public.pem");
+
+app.Run();
