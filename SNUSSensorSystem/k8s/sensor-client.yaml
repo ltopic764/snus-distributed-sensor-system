@@ -1,0 +1,117 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sensor-keys-pvc
+  namespace: snus
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Mi
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sensor-client
+  namespace: snus
+spec:
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: sensor-client
+
+  template:
+    metadata:
+      labels:
+        app: sensor-client
+
+    spec:
+      initContainers:
+        - name: wait-for-server-key
+          image: busybox:1.36
+
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for server public key...";
+
+              until [ -f /server-keys/server_public.pem ];
+              do
+                sleep 2;
+              done
+
+              echo "Server public key found.";
+
+          volumeMounts:
+            - name: server-keys
+              mountPath: /server-keys
+              readOnly: true
+
+      containers:
+        - name: sensor-client
+          image: snus-sensor-client:latest
+
+          imagePullPolicy: Never
+
+          env:
+            - name: DOTNET_ENVIRONMENT
+              valueFrom:
+                configMapKeyRef:
+                  name: snus-config
+                  key: DOTNET_ENVIRONMENT
+
+            - name: INGRESS_BASE_URL
+              value: "http://ingress-service:8080/"
+
+            - name: SERVER_PUBLIC_KEY_PATH
+              value: "/server-keys/server_public.pem"
+
+            - name: SENSOR_KEYS_PATH
+              value: "/app/sensor-keys"
+
+            - name: SENSOR_CONFIG_PATH
+              value: "/app/appsettings.json"
+
+          volumeMounts:
+            - name: server-keys
+              mountPath: /server-keys
+              readOnly: true
+
+            - name: sensor-keys
+              mountPath: /app/sensor-keys
+
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - test -f /server-keys/server_public.pem
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 12
+
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - test -r /proc/1/cmdline
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 5
+
+      volumes:
+        - name: server-keys
+          persistentVolumeClaim:
+            claimName: server-keys-pvc
+
+        - name: sensor-keys
+          persistentVolumeClaim:
+            claimName: sensor-keys-pvc

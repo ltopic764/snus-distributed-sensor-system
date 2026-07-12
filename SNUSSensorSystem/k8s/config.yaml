@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: snus-config
+  namespace: snus
+data:
+  ASPNETCORE_ENVIRONMENT: "Production"
+  DOTNET_ENVIRONMENT: "Production"
+
+  POSTGRES_DB: "snus"
+  POSTGRES_USER: "postgres"
+
+  INGESTION_URL: "http://ingestion-service:8080/"
+  NOTIFICATION_URL: "http://notification-service:8080/"
+  INGRESS_URL: "http://ingress-service:8080/"
+
+  CONNECTION_STRING: "Host=postgres-service;Port=5432;Database=snus;Username=postgres;Password=root"
+
+  REPLAY_TOLERANCE_SECONDS: "30"

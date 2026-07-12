@@ -12,6 +12,7 @@ builder.Services.AddControllers();
 builder.Services.AddAuthorization();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services.AddHealthChecks();
 
 // db
 var connectionString = builder.Configuration.GetConnectionString("SensorDb");
@@ -46,8 +47,9 @@ builder.Services.Configure<ServerCryptoOptions>(opts =>
 builder.Services.AddScoped<IMessageSecurityService, MessageSecurityService>();
 builder.Services.AddSingleton<ISensorRateLimiter, SensorRateLimiter>();
 
-var notificationBaseUrl = builder.Configuration["NotificationService:BaseUrl"]
-                          ?? "http://localhost:5175";
+var notificationBaseUrl =
+    builder.Configuration["NotificationService:BaseUrl"]
+    ?? "http://localhost:5048";
 builder.Services.AddHttpClient<IAlarmService, AlarmService>(client =>
 {
     client.BaseAddress = new Uri(notificationBaseUrl);
@@ -85,6 +87,7 @@ app.UseIpRateLimiting();
 app.UseHttpsRedirection();
 app.UseAuthorization();
 app.MapControllers();
+app.MapHealthChecks("/health");
 
 app.Logger.LogInformation("IngestionService started. Servers public key in keys/server_public.pem");
 

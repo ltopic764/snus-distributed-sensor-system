@@ -1,53 +1,52 @@
+using SNUSSensorSystem.Ingress.Configuration;
+using SNUSSensorSystem.Ingress.Middleware;
 
-namespace SNUSSensorSystem.Ingress
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddCors(options =>
 {
-    public class Program
-    {
-        public static void Main(string[] args)
+    options.AddPolicy(
+        "IngressCors",
+        policy =>
         {
-            var builder = WebApplication.CreateBuilder(args);
+            policy
+                .AllowAnyHeader()
+                .AllowAnyMethod()
+                .SetIsOriginAllowed(_ => true)
+                .AllowCredentials();
+        });
+});
 
-            // Add services to the container.
-            builder.Services.AddAuthorization();
+builder.Services.AddHealthChecks();
 
-            // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
-            builder.Services.AddEndpointsApiExplorer();
-            builder.Services.AddSwaggerGen();
+builder.Services.AddSnusReverseProxy(
+    builder.Configuration);
 
-            var app = builder.Build();
+var app = builder.Build();
 
-            // Configure the HTTP request pipeline.
-            if (app.Environment.IsDevelopment())
-            {
-                app.UseSwagger();
-                app.UseSwaggerUI();
-            }
+app.UseMiddleware<RequestLoggingMiddleware>();
 
-            app.UseHttpsRedirection();
+app.UseMiddleware<SecurityHeadersMiddleware>();
 
-            app.UseAuthorization();
+app.UseCors("IngressCors");
 
-            var summaries = new[]
-            {
-                "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-            };
+app.MapGet(
+    "/",
+    () => Results.Ok(new
+    {
+        service = "SNUS Ingress",
 
-            app.MapGet("/weatherforecast", (HttpContext httpContext) =>
-            {
-                var forecast = Enumerable.Range(1, 5).Select(index =>
-                    new WeatherForecast
-                    {
-                        Date = DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-                        TemperatureC = Random.Shared.Next(-20, 55),
-                        Summary = summaries[Random.Shared.Next(summaries.Length)]
-                    })
-                    .ToArray();
-                return forecast;
-            })
-            .WithName("GetWeatherForecast")
-            .WithOpenApi();
-
-            app.Run();
+        routes = new[]
+        {
+            "/api/ingest",
+            "/api/reports",
+            "/api/notify",
+            "/hub"
         }
-    }
-}
+    }));
+
+app.MapHealthChecks("/health");
+
+app.MapReverseProxy();
+
+app.Run();

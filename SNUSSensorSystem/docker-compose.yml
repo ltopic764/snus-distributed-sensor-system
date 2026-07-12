@@ -1,0 +1,261 @@
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: snus-postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: snus
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: root
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+    networks:
+      - snus-network
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U postgres -d snus
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: SNUSSensorSystem.NotificationService/Dockerfile
+
+    container_name: snus-notification-service
+    restart: unless-stopped
+
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+
+    ports:
+      - "5048:8080"
+
+    networks:
+      - snus-network
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >
+          bash -c
+          'exec 3<>/dev/tcp/127.0.0.1/8080 &&
+          printf "GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3 &&
+          grep -q "200 OK" <&3'
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+
+  ingestion-service:
+    build:
+      context: .
+      dockerfile: SNUSSensorSystem.IngestionService/Dockerfile
+
+    container_name: snus-ingestion-service
+    restart: unless-stopped
+
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+
+      ConnectionStrings__SensorDb: >-
+        Host=postgres;
+        Port=5432;
+        Database=snus;
+        Username=postgres;
+        Password=root
+
+      NotificationService__BaseUrl: >-
+        http://notification-service:8080
+
+      ServerCrypto__ReplayToleranceSeconds: "30"
+
+    ports:
+      - "5292:8080"
+
+    volumes:
+      - server-keys:/app/keys
+
+    networks:
+      - snus-network
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+      notification-service:
+        condition: service_healthy
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >
+          bash -c
+          'exec 3<>/dev/tcp/127.0.0.1/8080 &&
+          printf "GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3 &&
+          grep -q "200 OK" <&3'
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+
+  consensus-service:
+    build:
+      context: .
+      dockerfile: SNUSSensorSystem.ConsensusService/Dockerfile
+
+    container_name: snus-consensus-service
+    restart: unless-stopped
+
+    environment:
+      DOTNET_ENVIRONMENT: Production
+
+      ConnectionStrings__SensorDb: >-
+        Host=postgres;
+        Port=5432;
+        Database=snus;
+        Username=postgres;
+        Password=root
+
+    networks:
+      - snus-network
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+      ingestion-service:
+        condition: service_healthy
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - test -r /proc/1/cmdline
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+
+  ingress:
+    build:
+      context: .
+      dockerfile: SNUSSensorSystem.Ingress/Dockerfile
+
+    container_name: snus-ingress
+    restart: unless-stopped
+
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+
+      ReverseProxy__Clusters__ingestion-cluster__Destinations__primary__Address: >-
+        http://ingestion-service:8080/
+
+      ReverseProxy__Clusters__notification-cluster__Destinations__primary__Address: >-
+        http://notification-service:8080/
+
+    ports:
+      - "5115:8080"
+
+    networks:
+      - snus-network
+
+    depends_on:
+      ingestion-service:
+        condition: service_healthy
+
+      notification-service:
+        condition: service_healthy
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >
+          bash -c
+          'exec 3<>/dev/tcp/127.0.0.1/8080 &&
+          printf "GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3 &&
+          grep -q "200 OK" <&3'
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+
+  sensor-client:
+    build:
+      context: .
+      dockerfile: SNUSSensorSystem.SensorClient/Dockerfile
+
+    container_name: snus-sensor-client
+    restart: unless-stopped
+
+    environment:
+      DOTNET_ENVIRONMENT: Production
+
+      INGRESS_BASE_URL: http://ingress:8080/
+
+      SERVER_PUBLIC_KEY_PATH: /server-keys/server_public.pem
+
+      SENSOR_KEYS_PATH: /app/sensor-keys
+
+      SENSOR_CONFIG_PATH: /app/appsettings.json
+
+    volumes:
+      - server-keys:/server-keys:ro
+      - sensor-keys:/app/sensor-keys
+
+    networks:
+      - snus-network
+
+    depends_on:
+      ingress:
+        condition: service_healthy
+
+      ingestion-service:
+        condition: service_healthy
+
+    stdin_open: true
+    tty: true
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - test -r /proc/1/cmdline
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+
+networks:
+  snus-network:
+    name: snus-network
+    driver: bridge
+
+
+volumes:
+  postgres-data:
+    name: snus-postgres-data
+
+  server-keys:
+    name: snus-server-keys
+
+  sensor-keys:
+    name: snus-sensor-keys
