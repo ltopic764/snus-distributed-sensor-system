@@ -1,0 +1,132 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: server-keys-pvc
+  namespace: snus
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Mi
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ingestion-service
+  namespace: snus
+spec:
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: ingestion-service
+
+  template:
+    metadata:
+      labels:
+        app: ingestion-service
+
+    spec:
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres:16-alpine
+
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready \
+                -h postgres-service \
+                -p 5432 \
+                -U postgres \
+                -d snus;
+              do
+                echo "Waiting for PostgreSQL...";
+                sleep 2;
+              done
+
+      containers:
+        - name: ingestion-service
+          image: snus-ingestion-service:latest
+
+          imagePullPolicy: Never
+
+          ports:
+            - name: http
+              containerPort: 8080
+
+          env:
+            - name: ASPNETCORE_ENVIRONMENT
+              valueFrom:
+                configMapKeyRef:
+                  name: snus-config
+                  key: ASPNETCORE_ENVIRONMENT
+
+            - name: ASPNETCORE_URLS
+              value: "http://+:8080"
+
+            - name: ConnectionStrings__SensorDb
+              valueFrom:
+                configMapKeyRef:
+                  name: snus-config
+                  key: CONNECTION_STRING
+
+            - name: NotificationService__BaseUrl
+              valueFrom:
+                configMapKeyRef:
+                  name: snus-config
+                  key: NOTIFICATION_URL
+
+            - name: ServerCrypto__ReplayToleranceSeconds
+              valueFrom:
+                configMapKeyRef:
+                  name: snus-config
+                  key: REPLAY_TOLERANCE_SECONDS
+
+          volumeMounts:
+            - name: server-keys
+              mountPath: /app/keys
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 12
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 5
+
+      volumes:
+        - name: server-keys
+          persistentVolumeClaim:
+            claimName: server-keys-pvc
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: ingestion-service
+  namespace: snus
+spec:
+  selector:
+    app: ingestion-service
+
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+
+  type: ClusterIP
