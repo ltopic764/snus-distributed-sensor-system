@@ -16,6 +16,11 @@ public class ConsensusOptions
     // Used when MAD is zero
     public double MinimumAllowedDeviation { get; set; } = 2.0;
 
-    // Whether the current outlier immediately gets a BAD status
+    // Whether detected outliers should be tracked
+    // and eventually marked as BAD
     public bool MarkOutliersAsBad { get; set; } = true;
+
+    // Number of consecutive outlier periods required
+    // before the sensor is marked as BAD
+    public int OutlierStrikeThreshold { get; set; } = 3;
 }

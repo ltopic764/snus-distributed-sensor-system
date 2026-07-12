@@ -144,11 +144,12 @@ public class ConsensusCalculatorService
 
             _dbContext.ConsensusValues.Add(consensusValue);
 
-            if (_options.MarkOutliersAsBad &&
-                result.OutlierSensorIds.Count > 0)
+            if (_options.MarkOutliersAsBad)
             {
-                await MarkOutlierSensorsAsBadAsync(
+                await UpdateSensorOutlierCountsAsync(
+                    result.ParticipatingSensorIds,
                     result.OutlierSensorIds,
+                    previousMinuteStart,
                     cancellationToken);
             }
 
@@ -180,23 +181,78 @@ public class ConsensusCalculatorService
         }
     }
 
-    private async Task MarkOutlierSensorsAsBadAsync(
+    private async Task UpdateSensorOutlierCountsAsync(
+        IReadOnlyCollection<string> participatingSensorIds,
         IReadOnlyCollection<string> outlierSensorIds,
+        DateTime evaluatedMinute,
         CancellationToken cancellationToken)
     {
+        var evaluatedSensorIds = participatingSensorIds
+            .Concat(outlierSensorIds)
+            .Distinct()
+            .ToArray();
+
+        if (evaluatedSensorIds.Length == 0)
+        {
+            return;
+        }
+
         var sensors = await _dbContext.Sensors
             .Where(sensor =>
-                outlierSensorIds.Contains(sensor.Id))
+                evaluatedSensorIds.Contains(sensor.Id))
             .ToListAsync(cancellationToken);
+
+        var outlierIdSet = outlierSensorIds.ToHashSet();
 
         foreach (var sensor in sensors)
         {
+            var isOutlier = outlierIdSet.Contains(sensor.Id);
+
+            if (!isOutlier)
+            {
+                // A valid value breaks the sequence of outlier periods
+                sensor.ConsecutiveOutlierCount = 0;
+                sensor.LastOutlierMinute = null;
+                continue;
+            }
+
+            var expectedPreviousOutlierMinute =
+                evaluatedMinute.AddMinutes(-1);
+
+            // Increase the counter only when the previous outlier
+            // occurred in the immediately preceding minute
+            if (sensor.LastOutlierMinute ==
+                expectedPreviousOutlierMinute)
+            {
+                sensor.ConsecutiveOutlierCount++;
+            }
+            else
+            {
+                sensor.ConsecutiveOutlierCount = 1;
+            }
+
+            sensor.LastOutlierMinute = evaluatedMinute;
+
+            _logger.LogWarning(
+                "Sensor {SensorId} was detected as an outlier. " +
+                "Consecutive count: {Count}/{Threshold}.",
+                sensor.Id,
+                sensor.ConsecutiveOutlierCount,
+                _options.OutlierStrikeThreshold);
+
+            if (sensor.ConsecutiveOutlierCount <
+                _options.OutlierStrikeThreshold)
+            {
+                continue;
+            }
+
             sensor.DataQuality = DataQuality.Bad;
 
             _logger.LogWarning(
-                "Sensor {SensorId} was marked as BAD " +
-                "because its value was detected as an outlier.",
-                sensor.Id);
+                "Sensor {SensorId} was marked as BAD after " +
+                "{Count} consecutive outlier periods.",
+                sensor.Id,
+                sensor.ConsecutiveOutlierCount);
         }
     }
 

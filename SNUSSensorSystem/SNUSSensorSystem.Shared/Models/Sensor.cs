@@ -37,5 +37,13 @@ namespace SNUSSensorSystem.Shared.Models
         public long LastMessageId { get; set; }
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+        // Number of consecutive consensus periods in which
+        // this sensor was detected as an outlier
+        public int ConsecutiveOutlierCount { get; set; } = 0;
+
+        // Minute in which this sensor was last detected as an outlier
+        // Used to determine whether outlier periods are consecutive
+        public DateTime? LastOutlierMinute { get; set; }
     }
 }
