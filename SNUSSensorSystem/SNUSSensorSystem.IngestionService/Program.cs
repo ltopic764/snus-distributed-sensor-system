@@ -49,12 +49,26 @@ builder.Services.AddSingleton<ISensorRateLimiter, SensorRateLimiter>();
 
 var notificationBaseUrl =
     builder.Configuration["NotificationService:BaseUrl"]
-    ?? "http://localhost:5048";
-builder.Services.AddHttpClient<IAlarmService, AlarmService>(client =>
+    ?? throw new InvalidOperationException(
+        "Configuration value " +
+        "'NotificationService:BaseUrl' is required.");
+
+if (!Uri.TryCreate(
+        notificationBaseUrl,
+        UriKind.Absolute,
+        out var notificationServiceUri))
 {
-    client.BaseAddress = new Uri(notificationBaseUrl);
-    client.Timeout = TimeSpan.FromSeconds(5);
-});
+    throw new InvalidOperationException(
+        "Configuration value " +
+        "'NotificationService:BaseUrl' must be a valid absolute URL.");
+}
+
+builder.Services.AddHttpClient<IAlarmService, AlarmService>(
+    client =>
+    {
+        client.BaseAddress = notificationServiceUri;
+        client.Timeout = TimeSpan.FromSeconds(5);
+    });
 
 builder.Services.AddMemoryCache();
 builder.Services.Configure<IpRateLimitOptions>(
