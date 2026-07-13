@@ -1,56 +1,65 @@
+using SNUSSensorSystem.NotificationService.Hubs;
+using SNUSSensorSystem.NotificationService.Services;
 
-namespace SNUSSensorSystem.NotificationService
+var builder = WebApplication.CreateBuilder(args);
+
+const string CorsPolicyName = "SignalRCors";
+
+var allowedOrigins = builder.Configuration
+    .GetSection("Cors:AllowedOrigins")
+    .Get<string[]>() ?? Array.Empty<string>();
+
+builder.Services.AddControllers();
+builder.Services.AddAuthorization();
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+builder.Services.AddHealthChecks();
+builder.Services.AddSignalR();
+
+builder.Services.AddScoped<INotificationBroadcastService, NotificationBroadcastService>();
+
+builder.Services.AddCors(options =>
 {
-    public class Program
+    options.AddPolicy(CorsPolicyName, policy =>
     {
-        public static void Main(string[] args)
+        policy
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials();
+
+        if (allowedOrigins.Length == 0 || allowedOrigins.Contains("*"))
         {
-            var builder = WebApplication.CreateBuilder(args);
-
-            // Add services to the container.
-            builder.Services.AddAuthorization();
-
-            // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
-            builder.Services.AddEndpointsApiExplorer();
-            builder.Services.AddSwaggerGen();
-            builder.Services.AddHealthChecks();
-
-            var app = builder.Build();
-
-            // Configure the HTTP request pipeline.
-            if (app.Environment.IsDevelopment())
-            {
-                app.UseSwagger();
-                app.UseSwaggerUI();
-            }
-
-            app.UseHttpsRedirection();
-
-            app.UseAuthorization();
-
-            var summaries = new[]
-            {
-                "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-            };
-
-            app.MapGet("/weatherforecast", (HttpContext httpContext) =>
-            {
-                var forecast = Enumerable.Range(1, 5).Select(index =>
-                    new WeatherForecast
-                    {
-                        Date = DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-                        TemperatureC = Random.Shared.Next(-20, 55),
-                        Summary = summaries[Random.Shared.Next(summaries.Length)]
-                    })
-                    .ToArray();
-                return forecast;
-            })
-            .WithName("GetWeatherForecast")
-            .WithOpenApi();
-
-            app.MapHealthChecks("/health");
-
-            app.Run();
+            policy.SetIsOriginAllowed(_ => true);
         }
-    }
+        else
+        {
+            policy.WithOrigins(allowedOrigins);
+        }
+    });
+});
+
+var app = builder.Build();
+
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
 }
+
+app.UseRouting();
+app.UseCors(CorsPolicyName);
+app.UseAuthorization();
+
+app.MapControllers();
+app.MapHub<AlarmHub>("/hub/alarms");
+app.MapHealthChecks("/health");
+
+app.MapGet("/", () => Results.Ok(new
+{
+    service = "SNUS NotificationService",
+    notifyEndpoint = "/api/notify",
+    alarmHub = "/hub/alarms",
+    clientMethod = NotificationBroadcastService.AlarmClientMethod
+}));
+
+app.Run();
