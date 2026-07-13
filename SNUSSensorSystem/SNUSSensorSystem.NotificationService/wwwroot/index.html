@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="sr">
+<head>
+    <meta charset="utf-8" />
+    <title>SNUS - Alarmi uživo</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            background: #111;
+            color: #eee;
+            margin: 0;
+            padding: 20px;
+        }
+
+        h1 {
+            font-size: 20px;
+        }
+
+        #status {
+            font-size: 13px;
+            margin-bottom: 16px;
+        }
+
+        .alarm {
+            padding: 12px 16px;
+            margin: 8px 0;
+            border-radius: 6px;
+            border-left: 8px solid;
+            background: #1e1e1e;
+            animation: pop .3s ease;
+        }
+
+            .alarm .id {
+                font-weight: bold;
+            }
+
+            .alarm .meta {
+                font-size: 12px;
+                opacity: .8;
+            }
+
+        @keyframes pop {
+            from {
+                transform: scale(.96);
+                opacity: 0;
+            }
+
+            to {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>SNUS - real time alarms</h1>
+    <div id="status">Connecting...</div>
+    <div id="alarms"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.0/signalr.min.js"></script>
+    <script>
+        const statusEl = document.getElementById("status");
+        const alarmsEl = document.getElementById("alarms");
+
+        const connection = new signalR.HubConnectionBuilder()
+            .withUrl("/hub/alarms")
+            .withAutomaticReconnect()
+            .build();
+
+        connection.on("AlarmReceived", (alarm) => {
+            const div = document.createElement("div");
+            div.className = "alarm";
+            div.style.borderLeftColor = alarm.color;  // yellow / orange / red
+            div.innerHTML =
+                `<div class="id">${alarm.sensorId} — ${alarm.value.toFixed(2)} °C</div>` +
+                `<div class="meta">${alarm.priorityName} • ${new Date(alarm.timestamp).toLocaleString()}</div>`;
+            alarmsEl.prepend(div);
+        });
+
+        connection.onreconnecting(() => statusEl.textContent = "Reconnecting...");
+        connection.onreconnected(() => statusEl.textContent = "Connected");
+        connection.onclose(() => statusEl.textContent = "Connection closed");
+
+        connection.start()
+            .then(() => statusEl.textContent = "Connected — waiting for alarms...")
+            .catch(err => statusEl.textContent = "Connection error: " + err);
+    </script>
+</body>
+</html>
