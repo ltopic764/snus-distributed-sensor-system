@@ -1,8 +1,6 @@
 # snus-distributed-sensor-system
 Repozitorijum projekta iz predmeta nadzorno-upravljački sistemi.
 
-# SNUS Sensor System
-
 Distribuirani sistem za prikupljanje, obradu i čuvanje podataka sa senzora
 temperature. Primer primene: nadzor temperature u jezgru nuklearne elektrane.
 Sistem prati vrednosti i alarme, tolerantan je na otkaze, računa konsenzus
